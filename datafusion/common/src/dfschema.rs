@@ -18,7 +18,7 @@
 //! DFSchema is an extended schema struct that DataFusion uses to provide support for
 //! fields with optional relation names.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{Display, Formatter};
 use std::hash::Hash;
@@ -35,11 +35,59 @@ use arrow::datatypes::{DataType, Field, FieldRef, Fields, Schema, SchemaRef};
 /// A reference-counted reference to a `DFSchema`.
 pub type DFSchemaRef = Arc<DFSchema>;
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct FieldQ {
+    catalog: Option<String>,
+    schema: Option<String>,
+    table: Option<String>,
+    field: String,
+}
+
+impl FieldQ {
+    pub fn new(name: String, table_qualifier: Option<&TableReference>) -> FieldQ {
+        if let Some(q) = table_qualifier {
+            use TableReference::*;
+            match q {
+                Bare { table } => FieldQ {
+                    catalog: None,
+                    schema: None,
+                    table: Some(table.to_string()),
+                    field: name.to_owned(),
+                },
+                Partial { schema, table } => FieldQ {
+                    catalog: None,
+                    schema: Some(schema.to_string()),
+                    table: Some(table.to_string()),
+                    field: name.to_owned(),
+                },
+                Full {
+                    catalog,
+                    schema,
+                    table,
+                } => FieldQ {
+                    catalog: Some(catalog.to_string()),
+                    schema: Some(schema.to_string()),
+                    table: Some(table.to_string()),
+                    field: name.to_owned(),
+                },
+            }
+        } else {
+            FieldQ {
+                catalog: None,
+                schema: None,
+                table: None,
+                field: name.to_owned(),
+            }
+        }
+    }
+}
+
 /// DFSchema wraps an Arrow schema and adds relation names
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DFSchema {
     /// Fields
     fields: Vec<DFField>,
+    fields_index: BTreeMap<FieldQ, usize>,
     /// Additional metadata in form of key value pairs
     metadata: HashMap<String, String>,
     /// Stores functional dependencies in the schema.
@@ -51,6 +99,7 @@ impl DFSchema {
     pub fn empty() -> Self {
         Self {
             fields: vec![],
+            fields_index: BTreeMap::new(),
             metadata: HashMap::new(),
             functional_dependencies: FunctionalDependencies::empty(),
         }
@@ -102,8 +151,94 @@ impl DFSchema {
                 ));
             }
         }
+
+        let mut fields_index = BTreeMap::new();
+        for (idx, DFField { qualifier, field }) in fields.iter().enumerate() {
+            fields_index.insert(
+                FieldQ {
+                    catalog: None,
+                    schema: None,
+                    table: None,
+                    field: field.name().to_owned(),
+                },
+                idx,
+            );
+
+            if let Some(q) = qualifier {
+                use TableReference::*;
+
+                match q {
+                    Bare { table } => {
+                        fields_index.insert(
+                            FieldQ {
+                                catalog: None,
+                                schema: None,
+                                table: Some(table.to_string()),
+                                field: field.name().to_owned(),
+                            },
+                            idx,
+                        );
+                    }
+                    Partial { schema, table } => {
+                        fields_index.insert(
+                            FieldQ {
+                                catalog: None,
+                                schema: None,
+                                table: Some(table.to_string()),
+                                field: field.name().to_owned(),
+                            },
+                            idx,
+                        );
+                        fields_index.insert(
+                            FieldQ {
+                                catalog: None,
+                                schema: Some(schema.to_string()),
+                                table: Some(table.to_string()),
+                                field: field.name().to_owned(),
+                            },
+                            idx,
+                        );
+                    }
+                    Full {
+                        catalog,
+                        schema,
+                        table,
+                    } => {
+                        fields_index.insert(
+                            FieldQ {
+                                catalog: None,
+                                schema: None,
+                                table: Some(table.to_string()),
+                                field: field.name().to_owned(),
+                            },
+                            idx,
+                        );
+                        fields_index.insert(
+                            FieldQ {
+                                catalog: None,
+                                schema: Some(schema.to_string()),
+                                table: Some(table.to_string()),
+                                field: field.name().to_owned(),
+                            },
+                            idx,
+                        );
+                        fields_index.insert(
+                            FieldQ {
+                                catalog: Some(catalog.to_string()),
+                                schema: Some(schema.to_string()),
+                                table: Some(table.to_string()),
+                                field: field.name().to_owned(),
+                            },
+                            idx,
+                        );
+                    }
+                };
+            }
+        }
+
         Ok(Self {
             fields,
+            fields_index,
             metadata,
             functional_dependencies: FunctionalDependencies::empty(),
         })
@@ -206,35 +341,9 @@ impl DFSchema {
         qualifier: Option<&TableReference>,
         name: &str,
     ) -> Result<Option<usize>> {
-        let mut matches = self
-            .fields
-            .iter()
-            .enumerate()
-            .filter(|(_, field)| match (qualifier, &field.qualifier) {
-                // field to lookup is qualified.
-                // current field is qualified and not shared between relations, compare both
-                // qualifier and name.
-                (Some(q), Some(field_q)) => {
-                    q.resolved_eq(field_q) && field.name() == name
-                }
-                // field to lookup is qualified but current field is unqualified.
-                (Some(qq), None) => {
-                    // the original field may now be aliased with a name that matches the
-                    // original qualified name
-                    let column = Column::from_qualified_name(field.name());
-                    match column {
-                        Column {
-                            relation: Some(r),
-                            name: column_name,
-                        } => &r == qq && column_name == name,
-                        _ => false,
-                    }
-                }
-                // field to lookup is unqualified, no need to compare qualifier
-                (None, Some(_)) | (None, None) => field.name() == name,
-            })
-            .map(|(idx, _)| idx);
-        Ok(matches.next())
+        let field_q = FieldQ::new(name.to_owned(), qualifier);
+        let idx = self.fields_index.get(&field_q);
+        Ok(idx.map(|idx| *idx))
     }
 
     /// Find the index of the column with the given qualifier and name
