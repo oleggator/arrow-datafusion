@@ -91,25 +91,17 @@ impl FieldQ {
     }
 
     pub fn resolved_eq(&self, other: &Self) -> bool {
-        match self {
-            Self { field, table: None, schema: None, catalog: None} => field.as_str() == other.field,
-            Self { field, table: Some(table), schema: None, catalog: None} => {
-                field.as_str() == other.field
-                    && other.table.as_ref().map_or(true, |ref t| t.as_str() == table)
-            },
-            Self { field, table: Some(table), schema: Some(schema), catalog: None} => {
-                field.as_str() == other.field
-                    && other.table.as_ref().map_or(true, |ref t| t.as_str() == table)
-                    && other.schema.as_ref().map_or(true, |ref s| s.as_str() == schema)
-            },
-            Self { field, table: Some(table), schema: Some(schema), catalog: Some(catalog)} => {
-                field.as_str() == other.field
-                    && other.table.as_ref().map_or(true, |ref t| t.as_str() == table)
-                    && other.schema.as_ref().map_or(true, |ref s| s.as_str() == schema)
-                    && other.catalog.as_ref().map_or(true, |ref c| c.as_str() == catalog)
-            },
-            _ => unreachable!(),
-        }
+        self.field == other.field
+            && eq_if_some(&self.table, &other.table)
+            && eq_if_some(&self.schema, &other.schema)
+            && eq_if_some(&self.catalog, &other.catalog)
+    }
+}
+
+fn eq_if_some<T: PartialEq>(lhs: &Option<T>, rhs: &Option<T>) -> bool {
+    match (lhs, rhs) {
+        (Some(lhs), Some(rhs)) => lhs == rhs,
+        _ => true,
     }
 }
 
