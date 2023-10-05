@@ -89,6 +89,28 @@ impl FieldQ {
             catalog: None,
         }
     }
+
+    pub fn resolved_eq(&self, other: &Self) -> bool {
+        match self {
+            Self { field, table: None, schema: None, catalog: None} => field.as_str() == other.field,
+            Self { field, table: Some(table), schema: None, catalog: None} => {
+                field.as_str() == other.field
+                    && other.table.as_ref().map_or(true, |ref t| t.as_str() == table)
+            },
+            Self { field, table: Some(table), schema: Some(schema), catalog: None} => {
+                field.as_str() == other.field
+                    && other.table.as_ref().map_or(true, |ref t| t.as_str() == table)
+                    && other.schema.as_ref().map_or(true, |ref s| s.as_str() == schema)
+            },
+            Self { field, table: Some(table), schema: Some(schema), catalog: Some(catalog)} => {
+                field.as_str() == other.field
+                    && other.table.as_ref().map_or(true, |ref t| t.as_str() == table)
+                    && other.schema.as_ref().map_or(true, |ref s| s.as_str() == schema)
+                    && other.catalog.as_ref().map_or(true, |ref c| c.as_str() == catalog)
+            },
+            _ => unreachable!(),
+        }
+    }
 }
 
 /// DFSchema wraps an Arrow schema and adds relation names
@@ -231,6 +253,10 @@ impl DFSchema {
             };
             if !duplicated_field {
                 self.fields.push(field.clone());
+                let idx = self.fields.len() - 1;
+
+                let field_q = FieldQ::new(field.name().clone(), field.qualifier());
+                self.fields_index.insert(field_q, idx);
             }
         }
         self.metadata.extend(other_schema.metadata.clone())
@@ -278,53 +304,23 @@ impl DFSchema {
         qualifier: Option<&TableReference>,
         name: &str,
     ) -> Result<Option<usize>> {
-        if self.fields_index.is_empty() {
-            return self.index_of_column_by_name_old(qualifier, name);
-        }
+        let predicate = |(q, idx): &(&FieldQ, &usize)| {
+            let other_fieldq = FieldQ::new(name.into(), qualifier);
+            let result = q.resolved_eq(&other_fieldq);
+            result
+        };
 
-        let field_q = FieldQ::new(name.to_owned(), qualifier);
-        let mut matches = self
-            .fields_index
-            .range(field_q..)
-            .take_while(|(q, _idx)| q.field == name)
-            .map(|(_q, idx)| *idx);
-        Ok(matches.next())
-    }
+        let new_result = {
+            let field_q = FieldQ::new(name.to_owned(), qualifier);
+            let mut matches = self
+                .fields_index
+                .range(field_q..)
+                .take_while(predicate)
+                .map(|(_q, idx)| *idx);
+            matches.next()
+        };
 
-    fn index_of_column_by_name_old(
-        &self,
-        qualifier: Option<&TableReference>,
-        name: &str,
-    ) -> Result<Option<usize>> {
-        let mut matches = self
-            .fields
-            .iter()
-            .enumerate()
-            .filter(|(_, field)| match (qualifier, &field.qualifier) {
-                // field to lookup is qualified.
-                // current field is qualified and not shared between relations, compare both
-                // qualifier and name.
-                (Some(q), Some(field_q)) => {
-                    q.resolved_eq(field_q) && field.name() == name
-                }
-                // field to lookup is qualified but current field is unqualified.
-                (Some(qq), None) => {
-                    // the original field may now be aliased with a name that matches the
-                    // original qualified name
-                    let column = Column::from_qualified_name(field.name());
-                    match column {
-                        Column {
-                            relation: Some(r),
-                            name: column_name,
-                        } => &r == qq && column_name == name,
-                        _ => false,
-                    }
-                }
-                // field to lookup is unqualified, no need to compare qualifier
-                (None, Some(_)) | (None, None) => field.name() == name,
-            })
-            .map(|(idx, _)| idx);
-        Ok(matches.next())
+        Ok(new_result)
     }
 
     /// Find the index of the column with the given qualifier and name
