@@ -341,9 +341,49 @@ impl DFSchema {
         qualifier: Option<&TableReference>,
         name: &str,
     ) -> Result<Option<usize>> {
+        if self.fields_index.is_empty() {
+            return self.index_of_column_by_name_old(qualifier, name);
+        }
+
         let field_q = FieldQ::new(name.to_owned(), qualifier);
         let idx = self.fields_index.get(&field_q);
         Ok(idx.map(|idx| *idx))
+    }
+
+    fn index_of_column_by_name_old(
+        &self,
+        qualifier: Option<&TableReference>,
+        name: &str,
+    ) -> Result<Option<usize>> {
+        let mut matches = self
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, field)| match (qualifier, &field.qualifier) {
+                // field to lookup is qualified.
+                // current field is qualified and not shared between relations, compare both
+                // qualifier and name.
+                (Some(q), Some(field_q)) => {
+                    q.resolved_eq(field_q) && field.name() == name
+                }
+                // field to lookup is qualified but current field is unqualified.
+                (Some(qq), None) => {
+                    // the original field may now be aliased with a name that matches the
+                    // original qualified name
+                    let column = Column::from_qualified_name(field.name());
+                    match column {
+                        Column {
+                            relation: Some(r),
+                            name: column_name,
+                        } => &r == qq && column_name == name,
+                        _ => false,
+                    }
+                }
+                // field to lookup is unqualified, no need to compare qualifier
+                (None, Some(_)) | (None, None) => field.name() == name,
+            })
+            .map(|(idx, _)| idx);
+        Ok(matches.next())
     }
 
     /// Find the index of the column with the given qualifier and name
