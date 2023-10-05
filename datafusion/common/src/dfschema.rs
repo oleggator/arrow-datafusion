@@ -304,7 +304,7 @@ impl DFSchema {
         qualifier: Option<&TableReference>,
         name: &str,
     ) -> Result<Option<usize>> {
-        let predicate = |(q, idx): &(&FieldQ, &usize)| {
+        let predicate = |(q, _idx): &(&FieldQ, &usize)| {
             let other_fieldq = FieldQ::new(name.into(), qualifier);
             let result = q.resolved_eq(&other_fieldq);
             result
@@ -358,9 +358,10 @@ impl DFSchema {
 
     /// Find all fields match the given name
     pub fn fields_with_unqualified_name(&self, name: &str) -> Vec<&DFField> {
-        self.fields
-            .iter()
-            .filter(|field| field.name() == name)
+        self.fields_index
+            .range(FieldQ::new_unqualified(name.to_owned())..)
+            .take_while(|(q, _idx)| q.field == name)
+            .map(|(_q, idx)| self.field(*idx))
             .collect()
     }
 
