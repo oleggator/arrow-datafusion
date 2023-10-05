@@ -296,23 +296,13 @@ impl DFSchema {
         qualifier: Option<&TableReference>,
         name: &str,
     ) -> Result<Option<usize>> {
-        let predicate = |(q, _idx): &(&FieldQ, &usize)| {
-            let other_fieldq = FieldQ::new(name.into(), qualifier);
-            let result = q.resolved_eq(&other_fieldq);
-            result
-        };
-
-        let new_result = {
-            let field_q = FieldQ::new(name.to_owned(), qualifier);
-            let mut matches = self
-                .fields_index
-                .range(field_q..)
-                .take_while(predicate)
-                .map(|(_q, idx)| *idx);
-            matches.next()
-        };
-
-        Ok(new_result)
+        let field_q = FieldQ::new(name.to_owned(), qualifier);
+        let mut matches = self
+            .fields_index
+            .range(field_q..)
+            .take_while(|(q, _idx)| q.resolved_eq(&FieldQ::new(name.to_owned(), qualifier)))
+            .map(|(_q, idx)| *idx);
+        Ok(matches.next())
     }
 
     /// Find the index of the column with the given qualifier and name
