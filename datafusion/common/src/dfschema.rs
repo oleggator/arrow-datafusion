@@ -37,10 +37,10 @@ pub type DFSchemaRef = Arc<DFSchema>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct FieldQ {
-    catalog: Option<String>,
-    schema: Option<String>,
-    table: Option<String>,
     field: String,
+    table: Option<String>,
+    schema: Option<String>,
+    catalog: Option<String>,
 }
 
 impl FieldQ {
