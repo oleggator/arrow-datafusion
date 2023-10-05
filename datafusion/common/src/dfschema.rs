@@ -46,63 +46,49 @@ struct FieldQ<'a> {
 
 impl<'a> FieldQ<'a> {
     pub fn new(name: Cow<'a, str>, table_qualifier: Option<&TableReference<'a>>) -> Self {
-        if let Some(q) = table_qualifier {
-            use TableReference::*;
-            match q {
-                Bare { table } => FieldQ {
-                    catalog: None,
-                    schema: None,
-                    table: Some(table.clone()),
-                    field: name,
-                },
-                Partial { schema, table } => FieldQ {
-                    catalog: None,
-                    schema: Some(schema.clone()),
-                    table: Some(table.clone()),
-                    field: name,
-                },
-                Full {
-                    catalog,
-                    schema,
-                    table,
-                } => FieldQ {
-                    catalog: Some(catalog.clone()),
-                    schema: Some(schema.clone()),
-                    table: Some(table.clone()),
-                    field: name,
-                },
-            }
-        } else {
-            FieldQ {
+        use TableReference::*;
+        match table_qualifier {
+            None => Self {
                 catalog: None,
                 schema: None,
                 table: None,
                 field: name,
-            }
-        }
-    }
-
-    fn new_unqualified(name: Cow<'a, str>) -> Self {
-        Self {
-            field: name,
-            table: None,
-            schema: None,
-            catalog: None,
+            },
+            Some(Bare { table }) => Self {
+                catalog: None,
+                schema: None,
+                table: Some(table.clone()),
+                field: name,
+            },
+            Some(Partial { schema, table }) => Self {
+                catalog: None,
+                schema: Some(schema.clone()),
+                table: Some(table.clone()),
+                field: name,
+            },
+            Some(Full {
+                catalog,
+                schema,
+                table,
+            }) => Self {
+                catalog: Some(catalog.clone()),
+                schema: Some(schema.clone()),
+                table: Some(table.clone()),
+                field: name,
+            },
         }
     }
 
     pub fn resolved_eq(&self, other: &Self) -> bool {
+        let eq_if_some = |lhs: &Option<_>, rhs: &Option<_>| match (lhs, rhs) {
+            (Some(lhs), Some(rhs)) => lhs == rhs,
+            _ => true,
+        };
+
         self.field == other.field
             && eq_if_some(&self.table, &other.table)
             && eq_if_some(&self.schema, &other.schema)
             && eq_if_some(&self.catalog, &other.catalog)
-    }
-}
-
-fn eq_if_some<T: PartialEq>(lhs: &Option<T>, rhs: &Option<T>) -> bool {
-    match (lhs, rhs) {
-        (Some(lhs), Some(rhs)) => lhs == rhs,
-        _ => true,
     }
 }
 
@@ -345,7 +331,7 @@ impl DFSchema {
     /// Find all fields match the given name
     pub fn fields_with_unqualified_name(&self, name: &str) -> Vec<&DFField> {
         self.fields_index
-            .range(FieldQ::new_unqualified(Cow::Borrowed(name))..)
+            .range(FieldQ::new(Cow::Borrowed(name), None)..)
             .take_while(|(q, _idx)| q.field == name)
             .map(|(_q, idx)| self.field(*idx))
             .collect()
