@@ -80,6 +80,15 @@ impl FieldQ {
             }
         }
     }
+
+    fn new_unqualified(name: String) -> Self {
+        Self {
+            field: name,
+            table: None,
+            schema: None,
+            catalog: None,
+        }
+    }
 }
 
 /// DFSchema wraps an Arrow schema and adds relation names
