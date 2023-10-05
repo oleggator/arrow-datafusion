@@ -18,6 +18,7 @@
 //! DFSchema is an extended schema struct that DataFusion uses to provide support for
 //! fields with optional relation names.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{Display, Formatter};
@@ -36,39 +37,39 @@ use arrow::datatypes::{DataType, Field, FieldRef, Fields, Schema, SchemaRef};
 pub type DFSchemaRef = Arc<DFSchema>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct FieldQ {
-    field: String,
-    table: Option<String>,
-    schema: Option<String>,
-    catalog: Option<String>,
+struct FieldQ<'a> {
+    field: Cow<'a, str>,
+    table: Option<Cow<'a, str>>,
+    schema: Option<Cow<'a, str>>,
+    catalog: Option<Cow<'a, str>>,
 }
 
-impl FieldQ {
-    pub fn new(name: String, table_qualifier: Option<&TableReference>) -> FieldQ {
+impl<'a> FieldQ<'a> {
+    pub fn new(name: Cow<'a, str>, table_qualifier: Option<&TableReference<'a>>) -> Self {
         if let Some(q) = table_qualifier {
             use TableReference::*;
             match q {
                 Bare { table } => FieldQ {
                     catalog: None,
                     schema: None,
-                    table: Some(table.to_string()),
-                    field: name.to_owned(),
+                    table: Some(table.clone()),
+                    field: name,
                 },
                 Partial { schema, table } => FieldQ {
                     catalog: None,
-                    schema: Some(schema.to_string()),
-                    table: Some(table.to_string()),
-                    field: name.to_owned(),
+                    schema: Some(schema.clone()),
+                    table: Some(table.clone()),
+                    field: name,
                 },
                 Full {
                     catalog,
                     schema,
                     table,
                 } => FieldQ {
-                    catalog: Some(catalog.to_string()),
-                    schema: Some(schema.to_string()),
-                    table: Some(table.to_string()),
-                    field: name.to_owned(),
+                    catalog: Some(catalog.clone()),
+                    schema: Some(schema.clone()),
+                    table: Some(table.clone()),
+                    field: name,
                 },
             }
         } else {
@@ -76,12 +77,12 @@ impl FieldQ {
                 catalog: None,
                 schema: None,
                 table: None,
-                field: name.to_owned(),
+                field: name,
             }
         }
     }
 
-    fn new_unqualified(name: String) -> Self {
+    fn new_unqualified(name: Cow<'a, str>) -> Self {
         Self {
             field: name,
             table: None,
@@ -110,7 +111,7 @@ fn eq_if_some<T: PartialEq>(lhs: &Option<T>, rhs: &Option<T>) -> bool {
 pub struct DFSchema {
     /// Fields
     fields: Vec<DFField>,
-    fields_index: BTreeMap<FieldQ, usize>,
+    fields_index: BTreeMap<FieldQ<'static>, usize>,
     /// Additional metadata in form of key value pairs
     metadata: HashMap<String, String>,
     /// Stores functional dependencies in the schema.
@@ -178,7 +179,7 @@ impl DFSchema {
         let mut fields_index = BTreeMap::new();
         for (idx, DFField { qualifier, field }) in fields.iter().enumerate() {
             let field_q = FieldQ::new(
-                field.name().clone(),
+                Cow::Owned(field.name().clone()),
                 match qualifier {
                     Some(q) => Some(q),
                     None => None,
@@ -247,7 +248,8 @@ impl DFSchema {
                 self.fields.push(field.clone());
                 let idx = self.fields.len() - 1;
 
-                let field_q = FieldQ::new(field.name().clone(), field.qualifier());
+                let field_q =
+                    FieldQ::new(Cow::Owned(field.name().clone()), field.qualifier());
                 self.fields_index.insert(field_q, idx);
             }
         }
@@ -296,11 +298,13 @@ impl DFSchema {
         qualifier: Option<&TableReference>,
         name: &str,
     ) -> Result<Option<usize>> {
-        let field_q = FieldQ::new(name.to_owned(), qualifier);
+        let field_q = FieldQ::new(Cow::Borrowed(name), qualifier);
         let mut matches = self
             .fields_index
             .range(field_q..)
-            .take_while(|(q, _idx)| q.resolved_eq(&FieldQ::new(name.to_owned(), qualifier)))
+            .take_while(|(q, _idx)| {
+                q.resolved_eq(&FieldQ::new(Cow::Borrowed(name), qualifier))
+            })
             .map(|(_q, idx)| *idx);
         Ok(matches.next())
     }
@@ -341,7 +345,7 @@ impl DFSchema {
     /// Find all fields match the given name
     pub fn fields_with_unqualified_name(&self, name: &str) -> Vec<&DFField> {
         self.fields_index
-            .range(FieldQ::new_unqualified(name.to_owned())..)
+            .range(FieldQ::new_unqualified(Cow::Borrowed(name))..)
             .take_while(|(q, _idx)| q.field == name)
             .map(|(_q, idx)| self.field(*idx))
             .collect()
