@@ -163,86 +163,14 @@ impl DFSchema {
 
         let mut fields_index = BTreeMap::new();
         for (idx, DFField { qualifier, field }) in fields.iter().enumerate() {
-            fields_index.insert(
-                FieldQ {
-                    catalog: None,
-                    schema: None,
-                    table: None,
-                    field: field.name().to_owned(),
+            let field_q = FieldQ::new(
+                field.name().clone(),
+                match qualifier {
+                    Some(q) => Some(q),
+                    None => None,
                 },
-                idx,
             );
-
-            if let Some(q) = qualifier {
-                use TableReference::*;
-
-                match q {
-                    Bare { table } => {
-                        fields_index.insert(
-                            FieldQ {
-                                catalog: None,
-                                schema: None,
-                                table: Some(table.to_string()),
-                                field: field.name().to_owned(),
-                            },
-                            idx,
-                        );
-                    }
-                    Partial { schema, table } => {
-                        fields_index.insert(
-                            FieldQ {
-                                catalog: None,
-                                schema: None,
-                                table: Some(table.to_string()),
-                                field: field.name().to_owned(),
-                            },
-                            idx,
-                        );
-                        fields_index.insert(
-                            FieldQ {
-                                catalog: None,
-                                schema: Some(schema.to_string()),
-                                table: Some(table.to_string()),
-                                field: field.name().to_owned(),
-                            },
-                            idx,
-                        );
-                    }
-                    Full {
-                        catalog,
-                        schema,
-                        table,
-                    } => {
-                        fields_index.insert(
-                            FieldQ {
-                                catalog: None,
-                                schema: None,
-                                table: Some(table.to_string()),
-                                field: field.name().to_owned(),
-                            },
-                            idx,
-                        );
-                        fields_index.insert(
-                            FieldQ {
-                                catalog: None,
-                                schema: Some(schema.to_string()),
-                                table: Some(table.to_string()),
-                                field: field.name().to_owned(),
-                            },
-                            idx,
-                        );
-                        fields_index.insert(
-                            FieldQ {
-                                catalog: Some(catalog.to_string()),
-                                schema: Some(schema.to_string()),
-                                table: Some(table.to_string()),
-                                field: field.name().to_owned(),
-                            },
-                            idx,
-                        );
-                    }
-                };
-            }
+            fields_index.insert(field_q, idx);
         }
 
         Ok(Self {
@@ -355,8 +283,12 @@ impl DFSchema {
         }
 
         let field_q = FieldQ::new(name.to_owned(), qualifier);
-        let idx = self.fields_index.get(&field_q);
-        Ok(idx.map(|idx| *idx))
+        let mut matches = self
+            .fields_index
+            .range(field_q..)
+            .take_while(|(q, _idx)| q.field == name)
+            .map(|(_q, idx)| *idx);
+        Ok(matches.next())
     }
 
     fn index_of_column_by_name_old(
