@@ -161,17 +161,7 @@ impl DFSchema {
             }
         }
 
-        let mut fields_index = BTreeMap::new();
-        for (idx, DFField { qualifier, field }) in fields.iter().enumerate() {
-            let field_q = FieldQ::new(
-                field.name().clone(),
-                match qualifier {
-                    Some(q) => Some(q),
-                    None => None,
-                },
-            );
-            fields_index.insert(field_q, idx);
-        }
+        let fields_index = build_index(&fields);
 
         Ok(Self {
             fields,
@@ -509,12 +499,15 @@ impl DFSchema {
 
     /// Strip all field qualifier in schema
     pub fn strip_qualifiers(self) -> Self {
+        let fields: Vec<DFField> = self
+            .fields
+            .into_iter()
+            .map(|f| f.strip_qualifier())
+            .collect();
+        let fields_index = build_index(&fields);
         DFSchema {
-            fields: self
-                .fields
-                .into_iter()
-                .map(|f| f.strip_qualifier())
-                .collect(),
+            fields,
+            fields_index,
             ..self
         }
     }
@@ -522,12 +515,15 @@ impl DFSchema {
     /// Replace all field qualifier with new value in schema
     pub fn replace_qualifier(self, qualifier: impl Into<OwnedTableReference>) -> Self {
         let qualifier = qualifier.into();
+        let fields: Vec<DFField> = self
+            .fields
+            .into_iter()
+            .map(|f| DFField::from_qualified(qualifier.clone(), f.field))
+            .collect();
+        let fields_index = build_index(&fields);
         DFSchema {
-            fields: self
-                .fields
-                .into_iter()
-                .map(|f| DFField::from_qualified(qualifier.clone(), f.field))
-                .collect(),
+            fields,
+            fields_index,
             ..self
         }
     }
@@ -549,6 +545,15 @@ impl DFSchema {
     pub fn functional_dependencies(&self) -> &FunctionalDependencies {
         &self.functional_dependencies
     }
+}
+
+fn build_index(fields: &[DFField]) -> BTreeMap<FieldQ, usize> {
+    fields
+        .iter()
+        .map(|field| FieldQ::new(field.name().clone(), field.qualifier().into()))
+        .enumerate()
+        .map(|(idx, field)| (field, idx))
+        .collect()
 }
 
 impl From<DFSchema> for Schema {
