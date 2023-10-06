@@ -2289,10 +2289,10 @@ mod tests {
                 metadata: {} } }\
         ], fields_index: {\
             FieldQ { \
-                field: \"a\",\
+                field: \"a\", \
                 table: None, \
                 schema: None, \
-                catalog: None }: 0 \
+                catalog: None }: 0\
         }, metadata: {}, functional_dependencies: FunctionalDependencies { deps: [] } }, \
         ExecutionPlan schema: Schema { fields: [\
             Field { \
