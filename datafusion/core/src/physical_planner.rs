@@ -2292,7 +2292,7 @@ mod tests {
                 field: \"a\", \
                 table: None, \
                 schema: None, \
-                catalog: None }: 0\
+                catalog: None }: [0]\
         }, metadata: {}, functional_dependencies: FunctionalDependencies { deps: [] } }, \
         ExecutionPlan schema: Schema { fields: [\
             Field { \

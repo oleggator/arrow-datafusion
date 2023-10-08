@@ -18,6 +18,7 @@
 //! DFSchema is an extended schema struct that DataFusion uses to provide support for
 //! fields with optional relation names.
 
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{Display, Formatter};
@@ -96,7 +97,7 @@ impl FieldQ {
 pub struct DFSchema {
     /// Fields
     fields: Vec<DFField>,
-    fields_index: BTreeMap<FieldQ, usize>,
+    fields_index: BTreeMap<FieldQ, Vec<usize>>,
     /// Additional metadata in form of key value pairs
     metadata: HashMap<String, String>,
     /// Stores functional dependencies in the schema.
@@ -224,7 +225,14 @@ impl DFSchema {
                 let idx = self.fields.len() - 1;
 
                 let field_q = FieldQ::new(field.name().clone(), field.qualifier());
-                self.fields_index.insert(field_q, idx);
+                match self.fields_index.entry(field_q) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(vec![idx]);
+                    }
+                    Entry::Occupied(mut entry) => {
+                        entry.get_mut().push(idx);
+                    }
+                }
             }
         }
         self.metadata.extend(other_schema.metadata.clone())
@@ -276,8 +284,11 @@ impl DFSchema {
         let mut matches = self
             .fields_index
             .range(field_q..)
-            .take_while(|(q, _idx)| q.resolved_eq(&FieldQ::new(name.to_owned(), qualifier)))
-            .map(|(_q, idx)| *idx);
+            .take_while(|(q, _idx)| {
+                q.resolved_eq(&FieldQ::new(name.to_owned(), qualifier))
+            })
+            .flat_map(|(_q, idx)| idx)
+            .map(|idx| *idx);
         Ok(matches.next())
     }
 
@@ -319,7 +330,8 @@ impl DFSchema {
         self.fields_index
             .range(FieldQ::new(name.to_owned(), None)..)
             .take_while(|(q, _idx)| q.field == name)
-            .map(|(_q, idx)| self.field(*idx))
+            .flat_map(|(_q, idx)| idx)
+            .map(|idx| self.field(*idx))
             .collect()
     }
 
@@ -547,13 +559,23 @@ impl DFSchema {
     }
 }
 
-fn build_index(fields: &[DFField]) -> BTreeMap<FieldQ, usize> {
-    fields
+fn build_index(fields: &[DFField]) -> BTreeMap<FieldQ, Vec<usize>> {
+    let mut index = BTreeMap::new();
+    let iter = fields
         .iter()
         .map(|field| FieldQ::new(field.name().clone(), field.qualifier().into()))
-        .enumerate()
-        .map(|(idx, field)| (field, idx))
-        .collect()
+        .enumerate();
+    for (idx, field) in iter {
+        match index.entry(field) {
+            Entry::Vacant(entry) => {
+                entry.insert(vec![idx]);
+            }
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().push(idx);
+            }
+        }
+    }
+    index
 }
 
 impl From<DFSchema> for Schema {
