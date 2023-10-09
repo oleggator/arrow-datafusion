@@ -2288,11 +2288,7 @@ mod tests {
                 dict_is_ordered: false, \
                 metadata: {} } }\
         ], fields_index: {\
-            FieldQ { \
-                field: \"a\", \
-                table: None, \
-                schema: None, \
-                catalog: None }: [0]\
+            FieldReference { name: \"a\", qualifier: None }: [0]\
         }, metadata: {}, functional_dependencies: FunctionalDependencies { deps: [] } }, \
         ExecutionPlan schema: Schema { fields: [\
             Field { \

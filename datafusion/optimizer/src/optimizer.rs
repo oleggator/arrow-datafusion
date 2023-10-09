@@ -505,9 +505,9 @@ mod tests {
              DFField { qualifier: Some(Bare { table: \"test\" }), field: Field { name: \"b\", data_type: UInt32, nullable: false, dict_id: 0, dict_is_ordered: false, metadata: {} } }, \
              DFField { qualifier: Some(Bare { table: \"test\" }), field: Field { name: \"c\", data_type: UInt32, nullable: false, dict_id: 0, dict_is_ordered: false, metadata: {} } }], \
              fields_index: {\
-             FieldQ { field: \"a\", table: Some(\"test\"), schema: None, catalog: None }: [0], \
-             FieldQ { field: \"b\", table: Some(\"test\"), schema: None, catalog: None }: [1], \
-             FieldQ { field: \"c\", table: Some(\"test\"), schema: None, catalog: None }: [2]}, \
+             FieldReference { name: \"a\", qualifier: Some(Bare { table: \"test\" }) }: [0], \
+             FieldReference { name: \"b\", qualifier: Some(Bare { table: \"test\" }) }: [1], \
+             FieldReference { name: \"c\", qualifier: Some(Bare { table: \"test\" }) }: [2]}, \
              metadata: {}, functional_dependencies: FunctionalDependencies { deps: [] } }.\
              \nThis was likely caused by a bug in DataFusion's code \
              and we would welcome that you file an bug report in our issue tracker",

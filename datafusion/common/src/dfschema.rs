@@ -18,6 +18,7 @@
 //! DFSchema is an extended schema struct that DataFusion uses to provide support for
 //! fields with optional relation names.
 
+use std::borrow::Cow;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
@@ -36,59 +37,41 @@ use arrow::datatypes::{DataType, Field, FieldRef, Fields, Schema, SchemaRef};
 /// A reference-counted reference to a `DFSchema`.
 pub type DFSchemaRef = Arc<DFSchema>;
 
+/// [`FieldReference`]s represent a multi part identifier (path) to a
+/// field that may require further resolution.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct FieldQ {
-    field: String,
-    table: Option<String>,
-    schema: Option<String>,
-    catalog: Option<String>,
+struct FieldReference<'a> {
+    /// The field name
+    name: Cow<'a, str>,
+    /// Optional qualifier (usually a table or relation name)
+    qualifier: Option<TableReference<'a>>,
 }
 
-impl FieldQ {
-    pub fn new(name: String, table_qualifier: Option<&TableReference>) -> Self {
-        use TableReference::*;
-        match table_qualifier {
-            None => Self {
-                catalog: None,
-                schema: None,
-                table: None,
-                field: name,
-            },
-            Some(Bare { table }) => Self {
-                catalog: None,
-                schema: None,
-                table: Some(table.to_string()),
-                field: name,
-            },
-            Some(Partial { schema, table }) => Self {
-                catalog: None,
-                schema: Some(schema.to_string()),
-                table: Some(table.to_string()),
-                field: name,
-            },
-            Some(Full {
-                catalog,
-                schema,
-                table,
-            }) => Self {
-                catalog: Some(catalog.to_string()),
-                schema: Some(schema.to_string()),
-                table: Some(table.to_string()),
-                field: name,
-            },
+/// This is a [`FieldReference`] that has 'static lifetime (aka it
+/// owns the underlying strings)
+type OwnedFieldReference = FieldReference<'static>;
+
+impl<'a> FieldReference<'a> {
+    /// Convenience method for creating a [`FieldReference`].
+    pub fn new(
+        name: impl Into<Cow<'a, str>>,
+        qualifier: Option<TableReference<'a>>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            qualifier,
         }
     }
 
+    /// Compare with another [`FieldReference`] as if both are resolved.
+    /// This allows comparing across variants, where if a field is not present
+    /// in both variants being compared then it is ignored in the comparison.
     pub fn resolved_eq(&self, other: &Self) -> bool {
-        let eq_if_some = |lhs: &Option<_>, rhs: &Option<_>| match (lhs, rhs) {
-            (Some(lhs), Some(rhs)) => lhs == rhs,
-            _ => true,
-        };
-
-        self.field == other.field
-            && eq_if_some(&self.table, &other.table)
-            && eq_if_some(&self.schema, &other.schema)
-            && eq_if_some(&self.catalog, &other.catalog)
+        self.name == other.name
+            && match (&self.qualifier, &other.qualifier) {
+                (Some(lhs), Some(rhs)) => lhs.resolved_eq(rhs),
+                _ => true,
+            }
     }
 }
 
@@ -97,7 +80,8 @@ impl FieldQ {
 pub struct DFSchema {
     /// Fields
     fields: Vec<DFField>,
-    fields_index: BTreeMap<FieldQ, Vec<usize>>,
+    /// Fields index
+    fields_index: BTreeMap<OwnedFieldReference, Vec<usize>>,
     /// Additional metadata in form of key value pairs
     metadata: HashMap<String, String>,
     /// Stores functional dependencies in the schema.
@@ -224,8 +208,11 @@ impl DFSchema {
                 self.fields.push(field.clone());
                 let idx = self.fields.len() - 1;
 
-                let field_q = FieldQ::new(field.name().clone(), field.qualifier());
-                match self.fields_index.entry(field_q) {
+                let field_ref = OwnedFieldReference::new(
+                    field.name().clone(),
+                    field.qualifier().map(|q| q.to_owned_reference()),
+                );
+                match self.fields_index.entry(field_ref) {
                     Entry::Vacant(entry) => {
                         entry.insert(vec![idx]);
                     }
@@ -280,14 +267,14 @@ impl DFSchema {
         qualifier: Option<&TableReference>,
         name: &str,
     ) -> Result<Option<usize>> {
-        let field_q = FieldQ::new(name.to_owned(), qualifier);
+        let field_ref = FieldReference::new(name, qualifier.map(|q| q.clone()));
         let mut matches = self
             .fields_index
-            .range(field_q..)
-            .take_while(|(q, _idx)| {
-                q.resolved_eq(&FieldQ::new(name.to_owned(), qualifier))
+            .range(field_ref..)
+            .take_while(|(q, _indices)| {
+                q.resolved_eq(&FieldReference::new(name, qualifier.map(|q| q.clone())))
             })
-            .flat_map(|(_q, idx)| idx)
+            .flat_map(|(_q, indices)| indices)
             .map(|idx| *idx);
         Ok(matches.next())
     }
@@ -328,9 +315,9 @@ impl DFSchema {
     /// Find all fields match the given name
     pub fn fields_with_unqualified_name(&self, name: &str) -> Vec<&DFField> {
         self.fields_index
-            .range(FieldQ::new(name.to_owned(), None)..)
-            .take_while(|(q, _idx)| q.field == name)
-            .flat_map(|(_q, idx)| idx)
+            .range(FieldReference::new(name, None)..)
+            .take_while(|(q, _indices)| q.name == name)
+            .flat_map(|(_q, indices)| indices)
             .map(|idx| self.field(*idx))
             .collect()
     }
@@ -559,11 +546,16 @@ impl DFSchema {
     }
 }
 
-fn build_index(fields: &[DFField]) -> BTreeMap<FieldQ, Vec<usize>> {
+fn build_index(fields: &[DFField]) -> BTreeMap<OwnedFieldReference, Vec<usize>> {
     let mut index = BTreeMap::new();
     let iter = fields
         .iter()
-        .map(|field| FieldQ::new(field.name().clone(), field.qualifier().into()))
+        .map(|field| {
+            OwnedFieldReference::new(
+                field.name().clone(),
+                field.qualifier().map(|q| q.to_owned_reference()),
+            )
+        })
         .enumerate();
     for (idx, field) in iter {
         match index.entry(field) {
